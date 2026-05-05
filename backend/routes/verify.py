@@ -36,7 +36,7 @@ async def post_verify(
     body: VerifyRequest,
     x_payment: Optional[str] = Header(default=None, alias="x-payment"),
 ) -> VerifyResponse:
-    if not x_payment or not x_payment.strip():
+    if not x_payment or x_payment.strip().lower() != "paid":
         return JSONResponse(status_code=402, content=_payment_required_payload())
 
     return await verify_stub(body)
