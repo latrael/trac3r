@@ -1,0 +1,89 @@
+{
+  "info": {
+    "_postman_id": "trac3r-day1-collection",
+    "name": "TRAC3R",
+    "description": "Day 1 demo surface for TRAC3R. Two requests hit POST {{baseUrl}}/verify with a clean dataset and a tampered dataset. Tests assert response shape including the x402 mock payment field.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000",
+      "description": "BE1 stub locally; override to API Gateway URL once deployed."
+    }
+  ],
+  "item": [
+    {
+      "name": "TRAC3R — Clean Dataset",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-PAYMENT", "value": "mock-x402-payload", "description": "x402 mock header. Real SDK wiring is Day 2+." }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/verify",
+          "host": ["{{baseUrl}}"],
+          "path": ["verify"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"algorithm\": \"trac3r-v1\",\n  \"dataset\": [\n    {\"timestamp\": \"2026-04-29T19:00:00Z\", \"value\": 100},\n    {\"timestamp\": \"2026-04-29T19:01:00Z\", \"value\": 102},\n    {\"timestamp\": \"2026-04-29T19:02:00Z\", \"value\": 101},\n    {\"timestamp\": \"2026-04-29T19:03:00Z\", \"value\": 103},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"value\": 104}\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', function () { pm.response.to.have.status(200); });",
+              "var json = pm.response.json();",
+              "pm.test('has trustScore', function () { pm.expect(json).to.have.property('trustScore'); });",
+              "pm.test('has flags array', function () { pm.expect(json.flags).to.be.an('array'); });",
+              "pm.test('has hash', function () { pm.expect(json).to.have.property('hash'); });",
+              "pm.test('payment.paid is true', function () { pm.expect(json.payment.paid).to.be.true; });",
+              "pm.test('payment.network is base', function () { pm.expect(json.payment.network).to.eql('base'); });",
+              "console.log('trustScore:', json.trustScore, 'status:', json.status);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "TRAC3R — Tampered Dataset",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "X-PAYMENT", "value": "mock-x402-payload" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/verify",
+          "host": ["{{baseUrl}}"],
+          "path": ["verify"]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"algorithm\": \"trac3r-v1\",\n  \"dataset\": [\n    {\"timestamp\": \"2026-04-29T19:00:00Z\", \"value\": 100},\n    {\"timestamp\": \"2026-04-29T19:01:00Z\", \"value\": 102},\n    {\"timestamp\": \"2026-04-29T19:02:00Z\", \"value\": 101},\n    {\"timestamp\": \"2026-04-29T19:03:00Z\", \"value\": 587},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"value\": 104},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"value\": 104}\n  ]\n}"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', function () { pm.response.to.have.status(200); });",
+              "var json = pm.response.json();",
+              "pm.test('has trustScore', function () { pm.expect(json).to.have.property('trustScore'); });",
+              "pm.test('flags non-empty', function () { pm.expect(json.flags.length).to.be.above(0); });",
+              "pm.test('payment.paid is true', function () { pm.expect(json.payment.paid).to.be.true; });",
+              "console.log('trustScore:', json.trustScore, 'flags:', json.flags);"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
