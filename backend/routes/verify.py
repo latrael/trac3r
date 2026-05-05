@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
@@ -33,14 +33,13 @@ def _payment_required_payload() -> dict:
 
 @router.post("", response_model=VerifyResponse)
 async def post_verify(
-    body: Any,
+    body: VerifyRequest,
     x_payment: Optional[str] = Header(default=None, alias="x-payment"),
 ) -> VerifyResponse:
-    if not x_payment or x_payment.strip().lower() != "paid":
+    if not x_payment or not x_payment.strip():
         return JSONResponse(status_code=402, content=_payment_required_payload())
 
-    request = VerifyRequest.model_validate(body)
-    return await verify_stub(request)
+    return await verify_stub(body)
 
 
 @router.get("/{hash_value}")
