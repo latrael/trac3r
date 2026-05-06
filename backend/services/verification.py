@@ -1,18 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
-from config.settings import get_supabase_service_role_key, get_supabase_url
+from aws.dynamodb import get_verification_record, put_verification_record
 from engine.analyzer import analyze
 from models.request import VerifyRequest
 from models.response import VerifyResponse
-from supabase import Client, create_client
 from utils.hash import generate_hash
-
-
-def _build_supabase_client() -> Client:
-    return create_client(get_supabase_url(), get_supabase_service_role_key())
 
 
 def _dataset_to_storage_payload(payload: VerifyRequest) -> list[dict]:
@@ -23,22 +18,21 @@ def _status_from_trust_score(trust_score: float) -> str:
     return "verified" if trust_score >= 0.85 else "flagged"
 
 
-def _save_verification_record(client: Client, record: dict) -> None:
-    client.table("verifications").insert(record).execute()
+def _format_z(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _fetch_verification_record(client: Client, hash_value: str) -> Optional[dict]:
-    result = (
-        client.table("verifications")
-        .select("hash,status,timestamp")
-        .eq("hash", hash_value)
-        .limit(1)
-        .execute()
-    )
-    rows = getattr(result, "data", None) or []
-    if not rows:
-        return None
-    return rows[0]
+def _normalize_stored_timestamp(value: Any) -> Any:
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    parsed = parsed.astimezone(timezone.utc).replace(microsecond=0)
+    return parsed.isoformat().replace("+00:00", "Z")
 
 
 async def verify_and_store(payload: VerifyRequest) -> VerifyResponse:
@@ -63,15 +57,14 @@ async def verify_and_store(payload: VerifyRequest) -> VerifyResponse:
         "trustScore": trust_score,
         "status": status,
         "flags": flags,
-        "timestamp": timestamp.isoformat().replace("+00:00", "Z"),
+        "timestamp": _format_z(timestamp),
         "algorithm": payload.algorithm,
         "dataset": dataset_payload,
     }
-    _save_verification_record(_build_supabase_client(), record)
+    put_verification_record(record)
 
-    response_status = "verified" if status == "verified" else "flagged"
     return VerifyResponse(
-        status=response_status,
+        status=status,
         trustScore=trust_score,
         flags=flags,
         hash=verification_hash,
@@ -81,7 +74,7 @@ async def verify_and_store(payload: VerifyRequest) -> VerifyResponse:
 
 
 async def get_verification_result(hash_value: str) -> dict[str, Any]:
-    record = _fetch_verification_record(_build_supabase_client(), hash_value)
+    record = get_verification_record(hash_value)
     if not record:
         return {"result": "not_found", "hash": hash_value}
 
@@ -89,11 +82,6 @@ async def get_verification_result(hash_value: str) -> dict[str, Any]:
     result = "flagged" if status == "flagged" else "match"
     return {
         "result": result,
-        "originalTimestamp": record.get("timestamp"),
+        "originalTimestamp": _normalize_stored_timestamp(record.get("timestamp")),
         "hash": record.get("hash", hash_value),
     }
-
-
-async def verify_stub(payload: VerifyRequest) -> VerifyResponse:
-    # Backwards-compatible alias to avoid breaking existing imports.
-    return await verify_and_store(payload)

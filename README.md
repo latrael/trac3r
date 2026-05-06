@@ -1,24 +1,18 @@
-# TRAC3R Backend - Day 1 Progress
+# TRAC3R Backend
 
-This repository currently contains the Day 1 API Lead backend setup for TRAC3R.  
-The focus is a working `POST /verify` stub with clean contracts for team integration.
+FastAPI service that verifies dataset integrity, scores trust, and persists
+results to Supabase. Payment is gated by a mock x402 header.
 
-## Implemented
+## Implemented (Day 2)
 
-- FastAPI backend scaffold in `backend/`
-- `POST /verify` stub endpoint
-  - Validates input with Pydantic (`dataset`, `algorithm`)
-  - Returns structured hardcoded verification response
-  - Does **not** call detection logic yet
-- x402-style payment mock
-  - Requires header `x-payment: paid`
-  - Returns `HTTP 402` payment-required JSON when missing/invalid
-- Deterministic SHA-256 utility in `backend/utils/hash.py`
-  - Hashes `dataset`, `trustScore`, sorted `flags`, `algorithm`, `timestamp`, `status`
-  - Returns hash prefixed with `0x`
-- Day 1 AWS helper placeholders
-  - `backend/aws/lambda_handler.py`
-  - `backend/aws/dynamodb.py`
+- `POST /verify` — runs detection engine, stores result, returns scored response
+- `GET /verify/{hash}` — fetches a stored verification by hash
+- `GET /health` — liveness check
+- x402-style payment mock (header `x-payment: paid`, otherwise HTTP 402)
+- Deterministic SHA-256 hashing in `backend/utils/hash.py` (`0x…` prefix)
+- Supabase persistence via service-role key (table: `verifications`)
+- Detection engine in `backend/engine/analyzer.py` (missing values, duplicate
+  timestamps, gaps, value spikes, replay)
 
 ## Backend layout
 
@@ -26,53 +20,91 @@ The focus is a working `POST /verify` stub with clean contracts for team integra
 backend/
 ├── main.py
 ├── requirements.txt
-├── routes/
-│   └── verify.py
-├── models/
-│   ├── request.py
-│   └── response.py
-├── engine/
-│   └── __init__.py
-├── utils/
-│   └── hash.py
-├── aws/
-│   ├── lambda_handler.py
-│   └── dynamodb.py
-├── services/
-│   └── verification.py
-└── config/
-    └── settings.py
+├── requirements-dev.txt
+├── routes/verify.py
+├── models/{request,response}.py
+├── engine/analyzer.py
+├── services/verification.py
+├── utils/hash.py
+├── bedrock/explainer.py
+└── config/settings.py
 ```
+
+## Environment
+
+Create `.env` at the repo root:
+
+```env
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<service_role JWT>
+```
+
+The service-role key (NOT the publishable / anon key) is required because the
+backend writes to a table protected by RLS. `main.py` loads `.env` automatically
+via `python-dotenv`.
+
+### Supabase schema
+
+Table `verifications`:
+
+| column      | type        | notes                                |
+|-------------|-------------|--------------------------------------|
+| hash        | text (PK)   | `0x…` SHA-256                        |
+| trustScore  | float8      | 0.0 – 1.0                            |
+| status      | text        | `verified` or `flagged`              |
+| flags       | jsonb       | array of strings                     |
+| timestamp   | timestamptz | UTC                                  |
+| algorithm   | text        | e.g. `trac3r-v1`                     |
+| dataset     | jsonb       | original dataset rows                |
 
 ## Run locally
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Base URL: `http://localhost:8000`
-
-## Test `POST /verify`
+Or from the repo root:
 
 ```bash
-curl -sS -X POST "http://localhost:8000/verify" \
-  -H "Content-Type: application/json" \
-  -H "x-payment: paid" \
-  -d '{
-    "dataset": [
-      {"timestamp": "2026-04-29T19:00:00Z", "source": "node1", "value": 1200},
-      {"timestamp": "2026-04-29T19:01:00Z", "source": "node2", "value": 1250}
-    ],
-    "algorithm": "trac3r-v1"
-  }'
+uvicorn backend.main:app --reload --port 8000
 ```
 
-Expected response shape (`timestamp` will vary):
+Base URL: `http://localhost:8000`
 
+## Run tests
+
+```bash
+cd backend
+source venv/bin/activate
+pip install -r requirements-dev.txt
+cd ..
+python -m pytest tests/ -v
+```
+
+The integration tests mock Supabase, so they run offline.
+
+## API
+
+### `POST /verify`
+
+Headers: `x-payment: paid` (required).
+
+Request:
+```json
+{
+  "dataset": [
+    {"timestamp": "2026-04-29T19:00:00Z", "source": "node1", "value": 1200},
+    {"timestamp": "2026-04-29T19:01:00Z", "source": "node2", "value": 1250}
+  ],
+  "algorithm": "trac3r-v1"
+}
+```
+
+Response (200):
 ```json
 {
   "status": "verified",
@@ -80,32 +112,40 @@ Expected response shape (`timestamp` will vary):
   "flags": [],
   "hash": "0xabc123...",
   "algorithm": "trac3r-v1",
-  "timestamp": "2026-05-05T16:43:15.993792Z"
+  "timestamp": "2026-04-29T19:03:00Z"
 }
 ```
 
-If `x-payment` is missing or not `paid`, response is `HTTP 402`:
+`status` is normalized at the API layer to `verified` (trustScore ≥ 0.85) or
+`flagged` (otherwise). The analyzer's internal `warning` band is not surfaced.
 
+Response (402, no `x-payment`):
 ```json
 {
   "error": "Payment required",
   "x402": {
     "version": 1,
     "accepts": [
-      {
-        "scheme": "exact",
-        "network": "base",
-        "maxAmountRequired": "0.01",
-        "asset": "USDC"
-      }
+      {"scheme": "exact", "network": "base", "maxAmountRequired": "0.01", "asset": "USDC"}
     ],
     "memo": "trac3r-verification"
   }
 }
 ```
 
-## Environment variables (AWS prep)
+### `GET /verify/{hash}`
 
-For production Lambda deployment, prefer IAM roles over static keys.
+| stored status | response                                                       |
+|---------------|----------------------------------------------------------------|
+| (none)        | `{"result": "not_found", "hash": "0x…"}`                       |
+| `verified`    | `{"result": "match", "originalTimestamp": "…Z", "hash": "0x…"}` |
+| `flagged`     | `{"result": "flagged", "originalTimestamp": "…Z", "hash": "0x…"}` |
 
- test change for PR
+## Quick curl
+
+```bash
+curl -sS -X POST "http://localhost:8000/verify" \
+  -H "Content-Type: application/json" \
+  -H "x-payment: paid" \
+  -d '{"dataset":[{"timestamp":"2026-04-29T19:00:00Z","source":"node1","value":1200}],"algorithm":"trac3r-v1"}'
+```
