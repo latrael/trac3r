@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TRAC3R Demo</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --panel: #141821;
+      --panel-2: #1c2230;
+      --text: #e6e9ef;
+      --muted: #8b94a7;
+      --accent: #7c5cff;
+      --good: #2ecc71;
+      --warn: #f1c40f;
+      --bad: #ff5c5c;
+      --border: #232a3a;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 32px 48px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    header h1 { margin: 0; font-size: 28px; letter-spacing: 2px; }
+    header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+    main { padding: 32px 48px; max-width: 1100px; margin: 0 auto; }
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    input[type="text"] {
+      flex: 1;
+      min-width: 280px;
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card h3 { margin: 0 0 12px; font-size: 13px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); }
+    .score { font-size: 48px; font-weight: 700; font-family: var(--mono); }
+    .score.good { color: var(--good); }
+    .score.warn { color: var(--warn); }
+    .score.bad { color: var(--bad); }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .badge.good { background: rgba(46, 204, 113, 0.15); color: var(--good); }
+    .badge.warn { background: rgba(241, 196, 15, 0.15); color: var(--warn); }
+    .badge.bad  { background: rgba(255, 92, 92, 0.15); color: var(--bad); }
+    .badge.muted { background: var(--panel-2); color: var(--muted); }
+    ul.flags { margin: 0; padding-left: 18px; }
+    ul.flags li { margin-bottom: 6px; font-size: 14px; }
+    .explanation { line-height: 1.55; font-size: 14px; }
+    .hash { font-family: var(--mono); font-size: 12px; color: var(--muted); word-break: break-all; }
+    .payment-row { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }
+    .payment-row span b { color: var(--text); }
+    .empty { color: var(--muted); font-style: italic; font-size: 13px; }
+    pre {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      overflow: auto;
+      font-size: 12px;
+      max-height: 240px;
+    }
+    .row { display: flex; align-items: center; gap: 12px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>TRAC3R</h1>
+    <p>Data integrity verification for autonomous agents.</p>
+  </header>
+
+  <main>
+    <div class="controls">
+      <input id="apiUrl" type="text" value="http://localhost:8000" />
+      <button id="btnClean">Verify Clean Dataset</button>
+      <button id="btnTampered" class="secondary">Verify Tampered Dataset</button>
+      <button id="btnReset" class="secondary">Reset</button>
+    </div>
+
+    <div id="status" class="empty">Pick a dataset to call POST /verify.</div>
+
+    <div id="result" style="display:none; margin-top: 16px;">
+      <div class="grid">
+        <div class="card">
+          <h3>Trust Score</h3>
+          <div class="row">
+            <div id="score" class="score">--</div>
+            <div id="statusBadge" class="badge muted">--</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Payment (x402)</h3>
+          <div class="payment-row" id="payment">
+            <span class="empty">no payment field on response</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <h3>Flags</h3>
+        <ul id="flags" class="flags"></ul>
+        <div id="flagsEmpty" class="empty" style="display:none;">No anomalies detected.</div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <h3>Bedrock Explanation</h3>
+        <div id="explanation" class="explanation empty">No explanation field on response.</div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <h3>Hash</h3>
+        <div id="hash" class="hash">--</div>
+      </div>
+
+      <div class="card" style="margin-top: 16px;">
+        <h3>Raw response</h3>
+        <pre id="raw"></pre>
+      </div>
+    </div>
+  </main>
+
+  <script src="datasets.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setStatus(msg, kind) {
+      const el = $("status");
+      el.textContent = msg;
+      el.className = kind === "error" ? "" : "empty";
+      if (kind === "error") el.style.color = "var(--bad)";
+      else el.style.color = "";
+    }
+
+    function classifyScore(score) {
+      if (score >= 0.85) return "good";
+      if (score >= 0.70) return "warn";
+      return "bad";
+    }
+
+    function classifyStatus(status) {
+      if (status === "verified") return "good";
+      if (status === "warning") return "warn";
+      return "bad";
+    }
+
+    function render(json) {
+      $("result").style.display = "block";
+
+      const scoreEl = $("score");
+      scoreEl.textContent = (json.trustScore ?? "--").toString();
+      scoreEl.className = "score " + classifyScore(json.trustScore ?? 0);
+
+      const sb = $("statusBadge");
+      sb.textContent = json.status || "--";
+      sb.className = "badge " + classifyStatus(json.status);
+
+      const pay = $("payment");
+      if (json.payment) {
+        const p = json.payment;
+        pay.innerHTML = `
+          <span><b>${p.paid ? "PAID" : "UNPAID"}</b></span>
+          <span>network: <b>${p.network ?? "-"}</b></span>
+          <span>asset: <b>${p.asset ?? "-"}</b></span>
+          <span>amount: <b>${p.amount ?? "-"}</b></span>
+          <span>memo: <b>${p.memo ?? "-"}</b></span>`;
+      } else {
+        pay.innerHTML = '<span class="empty">no payment field on response</span>';
+      }
+
+      const flagsEl = $("flags");
+      const flagsEmpty = $("flagsEmpty");
+      flagsEl.innerHTML = "";
+      const flags = json.flags || [];
+      if (flags.length === 0) {
+        flagsEmpty.style.display = "block";
+      } else {
+        flagsEmpty.style.display = "none";
+        flags.forEach((f) => {
+          const li = document.createElement("li");
+          li.textContent = f;
+          flagsEl.appendChild(li);
+        });
+      }
+
+      const exp = $("explanation");
+      if (json.explanation) {
+        exp.textContent = json.explanation;
+        exp.className = "explanation";
+      } else {
+        exp.textContent = "No explanation field on response.";
+        exp.className = "explanation empty";
+      }
+
+      $("hash").textContent = json.hash || "--";
+      $("raw").textContent = JSON.stringify(json, null, 2);
+    }
+
+    async function verify(label, dataset) {
+      const apiUrl = $("apiUrl").value.replace(/\/$/, "");
+      setStatus(`Calling POST ${apiUrl}/verify with ${label} (${dataset.length} rows)...`);
+      try {
+        const res = await fetch(`${apiUrl}/verify`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-PAYMENT": "mock-x402-payload",
+          },
+          body: JSON.stringify({ algorithm: "trac3r-v1", dataset }),
+        });
+        const text = await res.text();
+        let json;
+        try { json = JSON.parse(text); } catch { json = { raw: text }; }
+        if (!res.ok) {
+          setStatus(`HTTP ${res.status} ${res.statusText}`, "error");
+          $("result").style.display = "block";
+          $("raw").textContent = JSON.stringify(json, null, 2);
+          return;
+        }
+        setStatus(`OK — ${label} verified.`);
+        render(json);
+      } catch (err) {
+        setStatus(`Network error: ${err.message}`, "error");
+      }
+    }
+
+    $("btnClean").addEventListener("click", () => verify("clean dataset", window.CLEAN_DATASET));
+    $("btnTampered").addEventListener("click", () => verify("tampered dataset", window.TAMPERED_DATASET));
+    $("btnReset").addEventListener("click", () => {
+      $("result").style.display = "none";
+      setStatus("Pick a dataset to call POST /verify.");
+    });
+  </script>
+</body>
+</html>

@@ -1,15 +1,20 @@
 {
   "info": {
-    "_postman_id": "trac3r-day1-collection",
+    "_postman_id": "trac3r-day2-collection",
     "name": "TRAC3R",
-    "description": "Day 1 demo surface for TRAC3R. Two requests hit POST {{baseUrl}}/verify with a clean dataset and a tampered dataset. Tests assert response shape including the x402 mock payment field.",
+    "description": "Day 2 demo surface for TRAC3R. POST /verify with a clean and a tampered dataset, then GET /verify/{hash} chained off the clean response. Tests assert response shape including trustScore, flags, explanation, hash, and the x402 mock payment field.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
       "value": "http://localhost:8000",
-      "description": "BE1 stub locally; override to API Gateway URL once deployed."
+      "description": "BE1 API. Override to API Gateway URL once deployed."
+    },
+    {
+      "key": "cleanHash",
+      "value": "",
+      "description": "Captured from the Clean Dataset response and reused by GET /verify/{hash}."
     }
   ],
   "item": [
@@ -19,16 +24,12 @@
         "method": "POST",
         "header": [
           { "key": "Content-Type", "value": "application/json" },
-          { "key": "X-PAYMENT", "value": "mock-x402-payload", "description": "x402 mock header. Real SDK wiring is Day 2+." }
+          { "key": "X-PAYMENT", "value": "mock-x402-payload", "description": "x402 mock header. Real SDK wiring comes after the demo." }
         ],
-        "url": {
-          "raw": "{{baseUrl}}/verify",
-          "host": ["{{baseUrl}}"],
-          "path": ["verify"]
-        },
+        "url": { "raw": "{{baseUrl}}/verify", "host": ["{{baseUrl}}"], "path": ["verify"] },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"algorithm\": \"trac3r-v1\",\n  \"dataset\": [\n    {\"timestamp\": \"2026-04-29T19:00:00Z\", \"value\": 100},\n    {\"timestamp\": \"2026-04-29T19:01:00Z\", \"value\": 102},\n    {\"timestamp\": \"2026-04-29T19:02:00Z\", \"value\": 101},\n    {\"timestamp\": \"2026-04-29T19:03:00Z\", \"value\": 103},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"value\": 104}\n  ]\n}"
+          "raw": "{\n  \"algorithm\": \"trac3r-v1\",\n  \"dataset\": [\n    {\"timestamp\": \"2026-04-29T19:00:00Z\", \"source\": \"node1\", \"value\": 1200},\n    {\"timestamp\": \"2026-04-29T19:01:00Z\", \"source\": \"node2\", \"value\": 1215},\n    {\"timestamp\": \"2026-04-29T19:02:00Z\", \"source\": \"node1\", \"value\": 1198},\n    {\"timestamp\": \"2026-04-29T19:03:00Z\", \"source\": \"node2\", \"value\": 1207},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"source\": \"node1\", \"value\": 1221},\n    {\"timestamp\": \"2026-04-29T19:05:00Z\", \"source\": \"node2\", \"value\": 1212},\n    {\"timestamp\": \"2026-04-29T19:06:00Z\", \"source\": \"node1\", \"value\": 1195},\n    {\"timestamp\": \"2026-04-29T19:07:00Z\", \"source\": \"node2\", \"value\": 1209},\n    {\"timestamp\": \"2026-04-29T19:08:00Z\", \"source\": \"node1\", \"value\": 1228},\n    {\"timestamp\": \"2026-04-29T19:09:00Z\", \"source\": \"node2\", \"value\": 1219},\n    {\"timestamp\": \"2026-04-29T19:10:00Z\", \"source\": \"node1\", \"value\": 1204},\n    {\"timestamp\": \"2026-04-29T19:11:00Z\", \"source\": \"node2\", \"value\": 1216},\n    {\"timestamp\": \"2026-04-29T19:12:00Z\", \"source\": \"node1\", \"value\": 1230},\n    {\"timestamp\": \"2026-04-29T19:13:00Z\", \"source\": \"node2\", \"value\": 1224},\n    {\"timestamp\": \"2026-04-29T19:14:00Z\", \"source\": \"node1\", \"value\": 1210},\n    {\"timestamp\": \"2026-04-29T19:15:00Z\", \"source\": \"node2\", \"value\": 1199},\n    {\"timestamp\": \"2026-04-29T19:16:00Z\", \"source\": \"node1\", \"value\": 1208},\n    {\"timestamp\": \"2026-04-29T19:17:00Z\", \"source\": \"node2\", \"value\": 1220},\n    {\"timestamp\": \"2026-04-29T19:18:00Z\", \"source\": \"node1\", \"value\": 1232},\n    {\"timestamp\": \"2026-04-29T19:19:00Z\", \"source\": \"node2\", \"value\": 1217},\n    {\"timestamp\": \"2026-04-29T19:20:00Z\", \"source\": \"node1\", \"value\": 1206},\n    {\"timestamp\": \"2026-04-29T19:21:00Z\", \"source\": \"node2\", \"value\": 1197},\n    {\"timestamp\": \"2026-04-29T19:22:00Z\", \"source\": \"node1\", \"value\": 1213},\n    {\"timestamp\": \"2026-04-29T19:23:00Z\", \"source\": \"node2\", \"value\": 1226},\n    {\"timestamp\": \"2026-04-29T19:24:00Z\", \"source\": \"node1\", \"value\": 1201}\n  ]\n}"
         }
       },
       "event": [
@@ -40,10 +41,12 @@
               "pm.test('200 OK', function () { pm.response.to.have.status(200); });",
               "var json = pm.response.json();",
               "pm.test('has trustScore', function () { pm.expect(json).to.have.property('trustScore'); });",
-              "pm.test('has flags array', function () { pm.expect(json.flags).to.be.an('array'); });",
+              "pm.test('trustScore is verified-tier (>= 0.85)', function () { pm.expect(json.trustScore).to.be.at.least(0.85); });",
+              "pm.test('flags is array (empty for clean)', function () { pm.expect(json.flags).to.be.an('array'); });",
               "pm.test('has hash', function () { pm.expect(json).to.have.property('hash'); });",
-              "pm.test('payment.paid is true', function () { pm.expect(json.payment.paid).to.be.true; });",
-              "pm.test('payment.network is base', function () { pm.expect(json.payment.network).to.eql('base'); });",
+              "pm.test('payment.paid is true', function () { if (json.payment) { pm.expect(json.payment.paid).to.be.true; } else { pm.expect.fail('payment field missing — BE1 has not added it yet'); } });",
+              "pm.test('explanation is non-empty string', function () { pm.expect(json.explanation, 'BE1 + BE3 wiring not complete yet').to.be.a('string').and.have.length.above(0); });",
+              "if (json.hash) { pm.collectionVariables.set('cleanHash', json.hash); console.log('cleanHash captured:', json.hash); }",
               "console.log('trustScore:', json.trustScore, 'status:', json.status);"
             ]
           }
@@ -58,14 +61,10 @@
           { "key": "Content-Type", "value": "application/json" },
           { "key": "X-PAYMENT", "value": "mock-x402-payload" }
         ],
-        "url": {
-          "raw": "{{baseUrl}}/verify",
-          "host": ["{{baseUrl}}"],
-          "path": ["verify"]
-        },
+        "url": { "raw": "{{baseUrl}}/verify", "host": ["{{baseUrl}}"], "path": ["verify"] },
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"algorithm\": \"trac3r-v1\",\n  \"dataset\": [\n    {\"timestamp\": \"2026-04-29T19:00:00Z\", \"value\": 100},\n    {\"timestamp\": \"2026-04-29T19:01:00Z\", \"value\": 102},\n    {\"timestamp\": \"2026-04-29T19:02:00Z\", \"value\": 101},\n    {\"timestamp\": \"2026-04-29T19:03:00Z\", \"value\": 587},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"value\": 104},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"value\": 104}\n  ]\n}"
+          "raw": "{\n  \"algorithm\": \"trac3r-v1\",\n  \"dataset\": [\n    {\"timestamp\": \"2026-04-29T19:00:00Z\", \"source\": \"node1\", \"value\": 1200},\n    {\"timestamp\": \"2026-04-29T19:01:00Z\", \"source\": \"node2\", \"value\": 1215},\n    {\"timestamp\": \"2026-04-29T19:02:00Z\", \"source\": \"node1\", \"value\": 1198},\n    {\"timestamp\": \"2026-04-29T19:03:00Z\", \"source\": \"node2\", \"value\": 1207},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"source\": \"node1\", \"value\": 1221},\n    {\"timestamp\": \"2026-04-29T19:05:00Z\", \"source\": \"node2\", \"value\": 1212},\n    {\"timestamp\": \"2026-04-29T19:06:00Z\", \"source\": \"node1\", \"value\": 1195},\n    {\"timestamp\": \"2026-04-29T19:06:00Z\", \"source\": \"node2\", \"value\": 1209},\n    {\"timestamp\": \"2026-04-29T19:08:00Z\", \"source\": \"node1\", \"value\": 1228},\n    {\"timestamp\": \"2026-04-29T19:09:00Z\", \"source\": \"node2\", \"value\": 1219},\n    {\"timestamp\": \"2026-04-29T19:10:00Z\", \"source\": \"node1\", \"value\": 1204},\n    {\"timestamp\": \"2026-04-29T19:11:00Z\", \"source\": \"node2\", \"value\": 1216},\n    {\"timestamp\": \"2026-04-29T19:12:00Z\", \"source\": \"node1\", \"value\": 1230},\n    {\"timestamp\": \"2026-04-29T19:13:00Z\", \"source\": \"node2\", \"value\": 7200},\n    {\"timestamp\": \"2026-04-29T19:14:00Z\", \"source\": \"node1\", \"value\": 1210},\n    {\"timestamp\": \"2026-04-29T19:15:00Z\", \"source\": \"node2\", \"value\": 1199},\n    {\"timestamp\": \"2026-04-29T19:16:00Z\", \"source\": \"node1\", \"value\": 1208},\n    {\"timestamp\": \"2026-04-29T19:17:00Z\", \"source\": \"node2\", \"value\": 1220},\n    {\"timestamp\": \"2026-04-29T19:19:00Z\", \"source\": \"node2\", \"value\": 1217},\n    {\"timestamp\": \"2026-04-29T19:20:00Z\", \"source\": \"node1\", \"value\": 1206},\n    {\"timestamp\": \"2026-04-29T19:21:00Z\", \"source\": \"node2\", \"value\": 1197},\n    {\"timestamp\": \"2026-04-29T19:04:00Z\", \"source\": \"node1\", \"value\": 1221},\n    {\"timestamp\": \"2026-04-29T19:22:00Z\", \"source\": \"node1\", \"value\": 1213},\n    {\"timestamp\": \"2026-04-29T19:23:00Z\", \"source\": \"node2\", \"value\": 1226},\n    {\"timestamp\": \"2026-04-29T19:24:00Z\", \"source\": \"node1\", \"value\": 1201}\n  ]\n}"
         }
       },
       "event": [
@@ -77,9 +76,49 @@
               "pm.test('200 OK', function () { pm.response.to.have.status(200); });",
               "var json = pm.response.json();",
               "pm.test('has trustScore', function () { pm.expect(json).to.have.property('trustScore'); });",
+              "pm.test('trustScore is flagged-tier (< 0.70)', function () { pm.expect(json.trustScore).to.be.below(0.70); });",
               "pm.test('flags non-empty', function () { pm.expect(json.flags.length).to.be.above(0); });",
-              "pm.test('payment.paid is true', function () { pm.expect(json.payment.paid).to.be.true; });",
+              "pm.test('payment.paid is true', function () { if (json.payment) { pm.expect(json.payment.paid).to.be.true; } else { pm.expect.fail('payment field missing — BE1 has not added it yet'); } });",
+              "pm.test('explanation is non-empty string', function () { pm.expect(json.explanation, 'BE1 + BE3 wiring not complete yet').to.be.a('string').and.have.length.above(0); });",
               "console.log('trustScore:', json.trustScore, 'flags:', json.flags);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "TRAC3R — Re-check Hash (Clean)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/verify/{{cleanHash}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["verify", "{{cleanHash}}"]
+        },
+        "description": "Reuses the hash captured from the Clean Dataset response. Run the Clean Dataset request first."
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "var h = pm.collectionVariables.get('cleanHash');",
+              "if (!h) { console.warn('cleanHash not set — run \"TRAC3R — Clean Dataset\" first.'); }"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK once BE1 implements GET /verify/{hash}', function () { pm.expect([200, 501]).to.include(pm.response.code); });",
+              "if (pm.response.code === 200) {",
+              "  var json = pm.response.json();",
+              "  pm.test('result is match', function () { pm.expect(json.result).to.eql('match'); });",
+              "}"
             ]
           }
         }

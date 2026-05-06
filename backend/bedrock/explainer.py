@@ -5,9 +5,17 @@ explain() falls back to a pre-written explanation keyed off status so callers ca
 always rely on a non-empty string.
 """
 import json
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+    _repo_root = Path(__file__).resolve().parents[2]
+    load_dotenv(_repo_root / ".env", override=False)
+except ImportError:
+    pass
 
 BEDROCK_REGION = "us-east-1"
-BEDROCK_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 FALLBACK_EXPLANATIONS = {
     "verified": "This dataset passed all integrity checks. No anomalies were detected. It is safe for use by agents or automated systems.",
