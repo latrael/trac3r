@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional
-
-from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException
 
 from models.request import VerifyRequest
 from models.response import VerifyResponse
@@ -12,33 +9,11 @@ from services.verification import get_verification_result, verify_and_store
 router = APIRouter(prefix="/verify", tags=["verify"])
 
 
-def _payment_required_payload() -> dict:
-    # Day 1 mock: Backend Engineer 3 owns full x402 wiring.
-    return {
-        "error": "Payment required",
-        "x402": {
-            "version": 1,
-            "accepts": [
-                {
-                    "scheme": "exact",
-                    "network": "base",
-                    "maxAmountRequired": "0.01",
-                    "asset": "USDC",
-                }
-            ],
-            "memo": "trac3r-verification",
-        },
-    }
-
-
 @router.post("", response_model=VerifyResponse)
-async def post_verify(
-    body: VerifyRequest,
-    x_payment: Optional[str] = Header(default=None, alias="x-payment"),
-) -> VerifyResponse:
-    if not x_payment or x_payment.strip().lower() != "paid":
-        return JSONResponse(status_code=402, content=_payment_required_payload())
-
+async def post_verify(body: VerifyRequest) -> VerifyResponse:
+    # Payment is enforced by the x402 middleware in main.py. By the time
+    # this handler runs, the X-PAYMENT header has been verified against the
+    # facilitator and request.state.payment_payload is populated.
     return await verify_and_store(body)
 
 

@@ -16,12 +16,33 @@ except ImportError:
     pass
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
+from config.settings import x402_enabled
+from routes.agent import router as agent_router
 from routes.verify import router as verify_router
 
 app = FastAPI(title="trac3r API")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-PAYMENT-RESPONSE"],
+)
+
+if x402_enabled():
+    from services.x402_gate import build_payment_middleware
+
+    _x402_mw = build_payment_middleware()
+
+    @app.middleware("http")
+    async def x402_middleware(request, call_next):
+        return await _x402_mw(request, call_next)
+
 app.include_router(verify_router)
+app.include_router(agent_router)
 
 
 @app.get("/health")

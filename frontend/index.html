@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TRAC3R — Data Integrity Verification</title>
+  <style>
+    :root {
+      --bg: #0b0d12;
+      --card: #14181f;
+      --line: #232830;
+      --text: #e6e9ef;
+      --muted: #8a93a6;
+      --accent: #4ade80;
+      --warn: #facc15;
+      --bad: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; padding: 32px 16px;
+      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, #1c2433 0%, var(--bg) 60%);
+      color: var(--text);
+    }
+    main { max-width: 880px; margin: 0 auto; }
+    h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: -0.01em; }
+    .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+    button {
+      flex: 1 1 200px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      background: var(--card); color: var(--text);
+      border-radius: 10px; font-size: 15px; font-weight: 500;
+      cursor: pointer; transition: 0.15s border-color, 0.15s transform;
+    }
+    button:hover { border-color: #3a4151; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: 0.5; cursor: progress; }
+    .card {
+      background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      padding: 20px; margin-bottom: 16px;
+    }
+    .grid { display: grid; grid-template-columns: 140px 1fr; gap: 8px 16px; font-size: 14px; }
+    .grid dt { color: var(--muted); }
+    .grid dd { margin: 0; word-break: break-all; }
+    .badge {
+      display: inline-block; padding: 3px 10px; border-radius: 999px;
+      font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge.verified { background: rgba(74,222,128,0.12); color: var(--accent); }
+    .badge.warning { background: rgba(250,204,21,0.12); color: var(--warn); }
+    .badge.flagged { background: rgba(248,113,113,0.12); color: var(--bad); }
+    .score { font-size: 36px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+    .score.verified { color: var(--accent); }
+    .score.warning { color: var(--warn); }
+    .score.flagged { color: var(--bad); }
+    .flags li { margin-bottom: 6px; font-size: 14px; }
+    .explanation { color: var(--muted); font-size: 14px; line-height: 1.5; margin-top: 12px; }
+    .pay { font-size: 12px; color: var(--muted); margin-top: 12px; }
+    .pay b { color: var(--text); }
+    .err { color: var(--bad); font-size: 14px; }
+    code { background: #0e1218; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>TRAC3R</h1>
+    <p class="sub">Data integrity verification for autonomous agents · Base Sepolia testnet</p>
+
+    <div class="row">
+      <button id="btn-clean">Verify clean dataset</button>
+      <button id="btn-tampered">Verify tampered dataset</button>
+    </div>
+
+    <div id="result"></div>
+  </main>
+
+  <script type="module">
+    const API = (() => {
+      const stored = localStorage.getItem("trac3r-api");
+      if (stored) return stored;
+      return location.origin && location.origin.startsWith("http")
+        ? location.origin
+        : "http://localhost:8000";
+    })();
+
+    const cleanDataset = makeDataset(false);
+    const tamperedDataset = makeDataset(true);
+
+    document.getElementById("btn-clean").onclick = () => run("Clean dataset", cleanDataset);
+    document.getElementById("btn-tampered").onclick = () => run("Tampered dataset", tamperedDataset);
+
+    function makeDataset(tamper) {
+      const start = new Date("2026-04-29T19:00:00Z").getTime();
+      const rows = [];
+      for (let i = 0; i < 25; i++) {
+        rows.push({
+          timestamp: new Date(start + i * 60_000).toISOString().replace(".000", ""),
+          source: i % 2 === 0 ? "node1" : "node2",
+          value: 1180 + Math.round(Math.sin(i / 3) * 30),
+        });
+      }
+      if (tamper) {
+        rows[8].timestamp = rows[7].timestamp;       // duplicate ts
+        rows[14].value = 7200;                       // value spike
+        rows.splice(18, 1);                          // gap
+        rows[20] = { ...rows[5] };                   // replayed row
+      }
+      return rows;
+    }
+
+    async function run(label, dataset) {
+      const target = document.getElementById("result");
+      target.innerHTML = `<div class="card">Calling TRAC3R… signing x402 payment on Base Sepolia.</div>`;
+      const buttons = document.querySelectorAll("button");
+      buttons.forEach((b) => (b.disabled = true));
+      try {
+        const res = await fetch(`${API}/agent/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ algorithm: "trac3r-v1", dataset }),
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body.detail || res.statusText);
+        target.innerHTML = render(label, body);
+      } catch (err) {
+        target.innerHTML = `<div class="card err">Error: ${err.message}</div>`;
+      } finally {
+        buttons.forEach((b) => (b.disabled = false));
+      }
+    }
+
+    function render(label, r) {
+      const status = (r.status || "unknown").toLowerCase();
+      const score = typeof r.trustScore === "number" ? r.trustScore.toFixed(2) : "—";
+      const flagsHtml = (r.flags || []).length
+        ? `<ul class="flags">${r.flags.map((f) => `<li>${escape(f)}</li>`).join("")}</ul>`
+        : `<p class="explanation">No anomalies detected.</p>`;
+      const explanation = r.explanation
+        ? `<p class="explanation">${escape(r.explanation)}</p>`
+        : "";
+      const pay = r.payment || {};
+      return `
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div>
+              <div style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:0.06em;">${escape(label)}</div>
+              <p class="score ${status}">${score}</p>
+            </div>
+            <span class="badge ${status}">${escape(status)}</span>
+          </div>
+          ${flagsHtml}
+          ${explanation}
+          <dl class="grid" style="margin-top:16px;">
+            <dt>Hash</dt><dd><code>${escape(r.hash || "")}</code></dd>
+            <dt>Algorithm</dt><dd>${escape(r.algorithm || "")}</dd>
+            <dt>Timestamp</dt><dd>${escape(r.timestamp || "")}</dd>
+          </dl>
+          <p class="pay">
+            <b>Payment:</b> ${escape(String(pay.amount || ""))} ${escape(String(pay.asset || ""))}
+            on ${escape(String(pay.network || ""))} · facilitator ${escape(String(pay.facilitator || ""))}
+          </p>
+        </div>`;
+    }
+
+    function escape(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
+    }
+  </script>
+</body>
+</html>

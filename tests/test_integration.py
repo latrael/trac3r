@@ -1,6 +1,9 @@
 """Integration tests for the FastAPI /verify routes wired to DynamoDB.
 
-DynamoDB is faked with moto, so the suite runs offline.
+DynamoDB is faked with moto so the suite runs offline. The x402 payment gate
+is disabled here (X402_ENABLED=false) — payment-protocol behavior is covered
+by tests/test_x402_gate.py (offline) and tests/test_live_e2e.py (real Base
+Sepolia round-trip).
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
 os.environ["AWS_SESSION_TOKEN"] = "testing"
 os.environ["AWS_REGION"] = "us-east-1"
 os.environ["DYNAMODB_TABLE"] = "trac3r-verifications-test"
+os.environ["X402_ENABLED"] = "false"
 
 from fastapi.testclient import TestClient  # noqa: E402
 from moto import mock_aws  # noqa: E402
@@ -58,19 +62,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"status": "ok"})
 
-    def test_payment_required_returns_402_x402_shape(self):
-        resp = self.client.post("/verify", json=CLEAN_PAYLOAD)
-        self.assertEqual(resp.status_code, 402)
-        body = resp.json()
-        self.assertEqual(body["error"], "Payment required")
-        self.assertIn("x402", body)
-        self.assertEqual(body["x402"]["version"], 1)
-        self.assertEqual(body["x402"]["accepts"][0]["asset"], "USDC")
-
     def test_verify_clean_returns_verified(self):
-        resp = self.client.post(
-            "/verify", json=CLEAN_PAYLOAD, headers={"x-payment": "paid"}
-        )
+        resp = self.client.post("/verify", json=CLEAN_PAYLOAD)
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
         self.assertEqual(body["status"], "verified")
@@ -81,9 +74,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn("timestamp", body)
 
     def test_verify_tampered_returns_flagged(self):
-        resp = self.client.post(
-            "/verify", json=TAMPERED_PAYLOAD, headers={"x-payment": "paid"}
-        )
+        resp = self.client.post("/verify", json=TAMPERED_PAYLOAD)
         self.assertEqual(resp.status_code, 200, resp.text)
         body = resp.json()
         self.assertEqual(body["status"], "flagged")
@@ -98,9 +89,7 @@ class IntegrationTests(unittest.TestCase):
             ],
             "algorithm": "trac3r-v1",
         }
-        resp = self.client.post(
-            "/verify", json=warning_payload, headers={"x-payment": "paid"}
-        )
+        resp = self.client.post("/verify", json=warning_payload)
         self.assertEqual(resp.status_code, 200, resp.text)
         self.assertIn(resp.json()["status"], ("verified", "flagged"))
 
@@ -112,9 +101,7 @@ class IntegrationTests(unittest.TestCase):
         )
 
     def test_get_verify_match_after_post(self):
-        post = self.client.post(
-            "/verify", json=CLEAN_PAYLOAD, headers={"x-payment": "paid"}
-        )
+        post = self.client.post("/verify", json=CLEAN_PAYLOAD)
         h = post.json()["hash"]
         resp = self.client.get(f"/verify/{h}")
         self.assertEqual(resp.status_code, 200)
@@ -124,9 +111,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(body["originalTimestamp"].endswith("Z"))
 
     def test_get_verify_flagged_after_post(self):
-        post = self.client.post(
-            "/verify", json=TAMPERED_PAYLOAD, headers={"x-payment": "paid"}
-        )
+        post = self.client.post("/verify", json=TAMPERED_PAYLOAD)
         h = post.json()["hash"]
         resp = self.client.get(f"/verify/{h}")
         self.assertEqual(resp.status_code, 200)

@@ -1,15 +1,17 @@
 """Autonomous agent simulation for the TRAC3R demo.
 
-The agent calls POST /verify before acting on a dataset. If the trust score
-clears 0.70 it proceeds; otherwise it refuses and prints the flags + Bedrock
-explanation.
+The agent calls POST /verify before acting on a dataset. The /verify endpoint
+is x402-gated, so the agent's HTTP session is wrapped with x402 payment
+handling — on a 402 response it signs an EIP-3009 payment authorization with
+the buyer's private key and retries automatically.
 
-Setup:
-    pip install -r demo/requirements.txt
+Required env (in .env at repo root):
+    BUYER_KEY=0x...            # private key for the demo buyer wallet (Base Sepolia, funded with USDC + ETH)
+    API_URL=http://localhost:8000   # optional, defaults to localhost
 
 Run:
+    pip install -r demo/requirements.txt
     python demo/agent_demo.py
-    API_URL=https://your-gateway/verify-base python demo/agent_demo.py
 """
 from __future__ import annotations
 
@@ -18,29 +20,46 @@ import sys
 from pathlib import Path
 
 import requests
+from dotenv import load_dotenv
+from eth_account import Account
+from x402 import x402ClientSync
+from x402.http.clients.requests import wrapRequestsWithPayment
+from x402.mechanisms.evm.exact import ExactEvmClientScheme
+from x402.mechanisms.evm.signers import EthAccountSigner
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from demo_data import clean_dataset, tampered_dataset  # noqa: E402
 
 API_URL = os.environ.get("API_URL", "http://localhost:8000")
-PAYMENT_HEADER = os.environ.get("X_PAYMENT", "mock-x402-payload")
+NETWORK = os.environ.get("X402_NETWORK", "eip155:84532")  # Base Sepolia
 TRUST_THRESHOLD = 0.70
 
 
-def agent_decision(label: str, dataset: list[dict]) -> bool:
+def _build_session() -> requests.Session:
+    key = os.environ.get("BUYER_KEY")
+    if not key:
+        raise SystemExit("BUYER_KEY not set in .env — cannot sign x402 payments.")
+
+    account = Account.from_key(key)
+    signer = EthAccountSigner(account)
+    client = x402ClientSync()
+    client.register(NETWORK, ExactEvmClientScheme(signer=signer))
+    return wrapRequestsWithPayment(requests.Session(), client)
+
+
+def agent_decision(label: str, session: requests.Session, dataset: list[dict]) -> bool:
     payload = {"algorithm": "trac3r-v1", "dataset": dataset}
-    headers = {"Content-Type": "application/json", "X-PAYMENT": PAYMENT_HEADER}
 
     try:
-        response = requests.post(
-            f"{API_URL}/verify", json=payload, headers=headers, timeout=30
-        )
+        response = session.post(f"{API_URL}/verify", json=payload, timeout=60)
     except requests.RequestException as exc:
         print(f"[{label}] Network error contacting {API_URL}: {exc}")
         return False
 
     if response.status_code != 200:
-        print(f"[{label}] {response.status_code} {response.reason}: {response.text}")
+        print(f"[{label}] {response.status_code} {response.reason}: {response.text[:300]}")
         return False
 
     result = response.json()
@@ -48,11 +67,13 @@ def agent_decision(label: str, dataset: list[dict]) -> bool:
     flags = result.get("flags", [])
     status = result.get("status", "unknown")
     explanation = result.get("explanation", "N/A")
-    payment = result.get("payment", {})
 
     print(f"--- {label} ---")
-    print(f"Payment: paid={payment.get('paid')} network={payment.get('network')} "
-          f"amount={payment.get('amount')} {payment.get('asset')}")
+    settle_header = response.headers.get("x-payment-response") or response.headers.get(
+        "X-PAYMENT-RESPONSE"
+    )
+    if settle_header:
+        print(f"Payment settled: {settle_header[:80]}…")
 
     if score is None:
         print(f"[{label}] Response missing trustScore: {result}")
@@ -72,10 +93,11 @@ def agent_decision(label: str, dataset: list[dict]) -> bool:
 
 
 def main() -> int:
-    print(f"Calling TRAC3R at {API_URL}\n")
-    agent_decision("Clean Data", clean_dataset)
+    session = _build_session()
+    print(f"Calling TRAC3R at {API_URL} (network={NETWORK})\n")
+    agent_decision("Clean Data", session, clean_dataset)
     print()
-    agent_decision("Tampered Data", tampered_dataset)
+    agent_decision("Tampered Data", session, tampered_dataset)
     return 0
 
 
