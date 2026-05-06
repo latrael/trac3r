@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 
 from models.request import VerifyRequest
 from models.response import VerifyResponse
-from services.verification import verify_stub
+from services.verification import get_verification_result, verify_and_store
 
 router = APIRouter(prefix="/verify", tags=["verify"])
 
@@ -33,19 +33,18 @@ def _payment_required_payload() -> dict:
 
 @router.post("", response_model=VerifyResponse)
 async def post_verify(
-    body: Any,
+    body: VerifyRequest,
     x_payment: Optional[str] = Header(default=None, alias="x-payment"),
 ) -> VerifyResponse:
     if not x_payment or x_payment.strip().lower() != "paid":
         return JSONResponse(status_code=402, content=_payment_required_payload())
 
-    request = VerifyRequest.model_validate(body)
-    return await verify_stub(request)
+    return await verify_and_store(body)
 
 
 @router.get("/{hash_value}")
 async def get_verify(hash_value: str) -> dict:
-    raise HTTPException(
-        status_code=501,
-        detail="GET /verify/{hash} is not implemented yet (Day 2).",
-    )
+    try:
+        return await get_verification_result(hash_value)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
