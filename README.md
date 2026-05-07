@@ -6,6 +6,10 @@ Each component is optimized for determinism, auditability, and demo clarity, whi
 
 ---
 
+https://github.com/user-attachments/assets/72170249-8096-4e77-9c5f-51b8e28d7234
+
+---
+
 ## 🛠 Component 1: `backend/services/x402_gate.py`
 
 ### Purpose:
