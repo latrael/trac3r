@@ -1,0 +1,21 @@
+{
+  "dataset_id": "transaction_log_tampered_v1",
+  "algorithm": "trac3r-v1",
+  "dataset": [
+    {"timestamp": "2026-04-29T19:00:00Z", "source": "node1", "value": 1200.50, "tx_id": "tx_001"},
+    {"timestamp": "2026-04-29T19:01:00Z", "source": "node2", "value": 1205.75, "tx_id": "tx_002"},
+    {"timestamp": "2026-04-29T19:02:00Z", "source": "node1", "value": 1210.20, "tx_id": "tx_003"},
+    {"timestamp": "2026-04-29T19:02:00Z", "source": "node1", "value": 1210.20, "tx_id": "tx_003"},
+    {"timestamp": "2026-04-29T19:03:00Z", "source": "node3", "value": null, "tx_id": "tx_004"},
+    {"timestamp": "2026-04-29T19:04:00Z", "source": "node2", "value": 1215.40, "tx_id": "tx_005"},
+    {"timestamp": "2026-04-29T19:05:00Z", "source": "node1", "value": 11850.60, "tx_id": "tx_006"},
+    {"timestamp": "2026-04-29T19:11:00Z", "source": "node3", "value": 1220.10, "tx_id": "tx_007"},
+    {"timestamp": "2026-04-29T19:12:00Z", "source": "node2", "value": 1222.85, "tx_id": "tx_008"},
+    {"timestamp": "2026-04-29T19:01:00Z", "source": "node2", "value": 1205.75, "tx_id": "tx_002"},
+    {"timestamp": "2026-04-29T19:13:00Z", "source": "node1", "value": 1225.30, "tx_id": "tx_009"},
+    {"timestamp": "2026-04-29T19:14:00Z", "source": "node3", "value": 1228.75, "tx_id": "tx_010"},
+    {"timestamp": "2026-04-29T19:15:00Z", "source": "node2", "value": null, "tx_id": "tx_011"},
+    {"timestamp": "2026-04-29T19:16:00Z", "source": "node1", "value": 1233.20, "tx_id": "tx_012"},
+    {"timestamp": "2026-04-29T19:17:00Z", "source": "node3", "value": 1235.90, "tx_id": "tx_013"}
+  ]
+}

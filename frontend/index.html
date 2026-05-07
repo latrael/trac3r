@@ -61,6 +61,14 @@
     .pay b { color: var(--text); }
     .err { color: var(--bad); font-size: 14px; }
     code { background: #0e1218; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    table.ds { width: 100%; border-collapse: collapse; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    table.ds th, table.ds td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+    table.ds th { color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
+    table.ds td.bad { background: rgba(248,113,113,0.12); color: var(--bad); }
+    table.ds tr.gap td { color: var(--warn); font-style: italic; background: rgba(250,204,21,0.06); }
+    .ds-note { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+    details { margin-top: 12px; }
+    details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
   </style>
 </head>
 <body>
@@ -85,11 +93,11 @@
         : "http://localhost:8000";
     })();
 
-    const cleanDataset = makeDataset(false);
-    const tamperedDataset = makeDataset(true);
+    const clean = makeDataset(false);
+    const tampered = makeDataset(true);
 
-    document.getElementById("btn-clean").onclick = () => run("Clean dataset", cleanDataset);
-    document.getElementById("btn-tampered").onclick = () => run("Tampered dataset", tamperedDataset);
+    document.getElementById("btn-clean").onclick = () => run("Clean dataset", clean);
+    document.getElementById("btn-tampered").onclick = () => run("Tampered dataset", tampered);
 
     function makeDataset(tamper) {
       const start = new Date("2026-04-29T19:00:00Z").getTime();
@@ -101,31 +109,68 @@
           value: 1180 + Math.round(Math.sin(i / 3) * 30),
         });
       }
+      const tampers = {};
       if (tamper) {
         rows[8].timestamp = rows[7].timestamp;       // duplicate ts
+        tampers[8] = ["timestamp"];
         rows[14].value = 7200;                       // value spike
-        rows.splice(18, 1);                          // gap
-        rows[20] = { ...rows[5] };                   // replayed row
+        tampers[14] = ["value"];
+        rows.splice(18, 1);                          // gap (drop row 18)
+        tampers.gapAfter = 17;
+        rows[19] = { ...rows[4] };                   // replayed row (now at index 19 after splice)
+        tampers[19] = ["timestamp", "source", "value"];
       }
-      return rows;
+      return { rows, tampers };
     }
 
-    async function run(label, dataset) {
+    function renderDataset(label, dataset, tampers) {
+      const rowHtml = dataset.map((r, i) => {
+        const bad = tampers[i] || [];
+        const tsCell = bad.includes("timestamp") ? `<td class="bad">${r.timestamp}</td>` : `<td>${r.timestamp}</td>`;
+        const srcCell = bad.includes("source") ? `<td class="bad">${r.source}</td>` : `<td>${r.source}</td>`;
+        const valCell = bad.includes("value") ? `<td class="bad">${r.value}</td>` : `<td>${r.value}</td>`;
+        const gap = tampers.gapAfter === i ? `<tr class="gap"><td>—</td><td colspan="3">missing row (gap)</td></tr>` : "";
+        return `<tr><td>${i}</td>${tsCell}${srcCell}${valCell}</tr>${gap}`;
+      }).join("");
+      const notes = [];
+      Object.entries(tampers).forEach(([k, v]) => {
+        if (k === "gapAfter") notes.push(`row ${v + 1}: missing (gap in sequence)`);
+        else notes.push(`row ${k}: tampered ${v.join(", ")}`);
+      });
+      const noteHtml = notes.length
+        ? `<p class="ds-note">⚠ ${notes.join(" · ")}</p>`
+        : `<p class="ds-note">${dataset.length} rows · no tampering</p>`;
+      return `
+        <div class="card">
+          <div style="color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">${escape(label)} — input</div>
+          <details open>
+            <summary>${dataset.length} rows sent to /agent/verify</summary>
+            <table class="ds" style="margin-top:10px;">
+              <thead><tr><th>#</th><th>timestamp</th><th>source</th><th>value</th></tr></thead>
+              <tbody>${rowHtml}</tbody>
+            </table>
+            ${noteHtml}
+          </details>
+        </div>`;
+    }
+
+    async function run(label, ds) {
       const target = document.getElementById("result");
-      target.innerHTML = `<div class="card">Calling TRAC3R… signing x402 payment on Base Sepolia.</div>`;
+      const preview = renderDataset(label, ds.rows, ds.tampers);
+      target.innerHTML = preview + `<div class="card">Calling TRAC3R… signing x402 payment on Base Sepolia.</div>`;
       const buttons = document.querySelectorAll("button");
       buttons.forEach((b) => (b.disabled = true));
       try {
         const res = await fetch(`${API}/agent/verify`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ algorithm: "trac3r-v1", dataset }),
+          body: JSON.stringify({ algorithm: "trac3r-v1", dataset: ds.rows }),
         });
         const body = await res.json();
         if (!res.ok) throw new Error(body.detail || res.statusText);
-        target.innerHTML = render(label, body);
+        target.innerHTML = preview + render(label, body);
       } catch (err) {
-        target.innerHTML = `<div class="card err">Error: ${err.message}</div>`;
+        target.innerHTML = preview + `<div class="card err">Error: ${err.message}</div>`;
       } finally {
         buttons.forEach((b) => (b.disabled = false));
       }

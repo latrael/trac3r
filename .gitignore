@@ -19,3 +19,7 @@ ENV/
 # Env files
 .env
 .env.local
+
+# Local-only
+.claude/
+docs/DEMO_SCRIPT.md
